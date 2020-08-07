@@ -15,24 +15,18 @@
 namespace cv
 {
 
-Histogram::Histogram(int numDimensions, int numBinsPerDimension)
+Histogram::Histogram(int numBins)
 {
-    m_numBinsPerDim = numBinsPerDimension;
-    m_numDim = numDimensions;
-    p_size = cvFloor(std::pow(m_numBinsPerDim, m_numDim));
-    p_bins.resize(p_size, 0);
-    p_dimIdCoef.resize(m_numDim, 1);
-    for (int i = 0; i < m_numDim-1; ++i)
-        p_dimIdCoef[i] = static_cast<int>(std::pow(numBinsPerDimension, m_numDim - 1 - i));
-
+    m_numBins = numBins;
+    p_coef = 1;
+    p_bins.resize(m_numBins, 0);
+ 
 }
 
-void Histogram::extractForegroundHistogram(std::vector<cv::Mat> & imgChannels,
+void Histogram::extractForegroundHistogram(const cv::Mat & img,
         cv::Mat weights, bool useMatWeights, int x1, int y1, int x2, int y2)
 {
-    //just for code clarity
-    cv::Mat & img = imgChannels[0];
-
+    CV_Assert(img.channels() == 1);
     if (!useMatWeights){
         //weights are epanechnikov distr. with peek at the center of the image;
         double cx = x1 + (x2-x1)/2.;
@@ -51,80 +45,65 @@ void Histogram::extractForegroundHistogram(std::vector<cv::Mat> & imgChannels,
         weights = kernelWeight;
     }
     //extract pixel values and compute histogram
-    double rangePerBinInverse = static_cast<double>(m_numBinsPerDim)/256.0;  // 1 / (imgRange/numBinsPerDim)
+    double rangePerBinInverse = static_cast<double>(m_numBins)/256.0;  // 1 / (imgRange/numBinsPerDim)
     double sum = 0;
     for (int y = y1; y < y2+1; ++y){
-        std::vector<const uchar *> dataPtr(m_numDim);
-        for (int dim = 0; dim < m_numDim; ++dim)
-            dataPtr[dim] = imgChannels[dim].ptr<uchar>(y);
+        const uchar * dataPtr = img.ptr<uchar>(y);
         const double * weightPtr = weights.ptr<double>(y);
 
         for (int x = x1; x < x2+1; ++x){
-            int id = 0;
-            for (int dim = 0; dim < m_numDim; ++dim){
-                id += p_dimIdCoef[dim]*cvFloor(rangePerBinInverse*dataPtr[dim][x]);
-            }
+            int id = p_coef*cvFloor(rangePerBinInverse*dataPtr[x]);
             p_bins[id] += weightPtr[x];
             sum += weightPtr[x];
         }
     }
     //normalize
     sum = 1./sum;
-    for(int i = 0; i < p_size; ++i)
+    for(int i = 0; i < m_numBins; ++i)
         p_bins[i] *= sum;
+   
 }
 
 void Histogram::extractBackGroundHistogram(
-        std::vector<cv::Mat> & imgChannels,
+        const cv::Mat& img,
         int x1, int y1, int x2, int y2,
         int outer_x1, int outer_y1, int outer_x2, int outer_y2)
 {
+    CV_Assert(img.channels() == 1);
     //extract pixel values and compute histogram
-    double rangePerBinInverse = static_cast<double>(m_numBinsPerDim)/256.0;  // 1 / (imgRange/numBinsPerDim)
+    double rangePerBinInverse = static_cast<double>(m_numBins)/256.0;  // 1 / (imgRange/numBinsPerDim)
     double sum = 0;
     for (int y = outer_y1; y < outer_y2; ++y){
 
-        std::vector<const uchar *> dataPtr(m_numDim);
-        for (int dim = 0; dim < m_numDim; ++dim)
-            dataPtr[dim] = imgChannels[dim].ptr<uchar>(y);
+        const uchar * dataPtr = img.ptr<uchar>(y);
 
         for (int x = outer_x1; x < outer_x2; ++x){
             if (x >= x1 && x <= x2 && y >= y1 && y <= y2)
                 continue;
 
-            int id = 0;
-            for (int dim = 0; dim < m_numDim; ++dim){
-                id += p_dimIdCoef[dim]*cvFloor(rangePerBinInverse*dataPtr[dim][x]);
-            }
+            int id = p_coef * cvFloor(rangePerBinInverse * dataPtr[x]);
             p_bins[id] += 1.0;
             sum += 1.0;
         }
     }
     //normalize
     sum = 1./sum;
-    for(int i = 0; i < p_size; ++i)
+    for(int i = 0; i < m_numBins; ++i)
         p_bins[i] *= sum;
 }
 
-cv::Mat Histogram::backProject(std::vector<cv::Mat> & imgChannels)
+cv::Mat Histogram::backProject(cv::Mat& img)
 {
-    //just for code clarity
-    cv::Mat & img = imgChannels[0];
-
+    CV_Assert(img.channels() == 1);
     cv::Mat backProject(img.rows, img.cols, CV_64FC1);
-    double rangePerBinInverse = static_cast<double>(m_numBinsPerDim)/256.0;  // 1 / (imgRange/numBinsPerDim)
+    double rangePerBinInverse = static_cast<double>(m_numBins)/256.0;  // 1 / (imgRange/numBinsPerDim)
 
     for (int y = 0; y < img.rows; ++y){
         double * backProjectPtr = backProject.ptr<double>(y);
-        std::vector<const uchar *> dataPtr(m_numDim);
-        for (int dim = 0; dim < m_numDim; ++dim)
-            dataPtr[dim] = imgChannels[dim].ptr<uchar>(y);
+        const uchar *dataPtr = img.ptr<uchar>(y);
 
         for (int x = 0; x < img.cols; ++x){
-            int id = 0;
-            for (int dim = 0; dim < m_numDim; ++dim){
-                id += p_dimIdCoef[dim]*cvFloor(rangePerBinInverse*dataPtr[dim][x]);
-            }
+            int id = p_coef*cvFloor(rangePerBinInverse*dataPtr[x]);
             backProjectPtr[x] = p_bins[id];
         }
     }
@@ -144,38 +123,38 @@ void Histogram::setHistogramVector(double *vector) {
 
 //-------------------- SEGMENT CLASS --------------------
 std::pair<cv::Mat, cv::Mat> Segment::computePosteriors(
-        std::vector<cv::Mat> &imgChannels,
+        cv::Mat& img,
         int x1, int y1, int x2, int y2,
         cv::Mat weights, cv::Mat fgPrior, cv::Mat bgPrior,
-        const Histogram &fgHistPrior, int numBinsPerChannel)
+        const Histogram &fgHistPrior, int numBins)
 {
     //preprocess and normalize all data
-    CV_Assert(imgChannels.size() > 0);
+    CV_Assert(img.channels() == 1);
 
     //fit target to the image
-    x1 = std::min(std::max(x1, 0), imgChannels[0].cols-1);
-    y1 = std::min(std::max(y1, 0), imgChannels[0].rows-1);
-    x2 = std::max(std::min(x2, imgChannels[0].cols-1), 0);
-    y2 = std::max(std::min(y2, imgChannels[0].rows-1), 0);
+    x1 = std::min(std::max(x1, 0), img.cols-1);
+    y1 = std::min(std::max(y1, 0), img.rows-1);
+    x2 = std::max(std::min(x2, img.cols-1), 0);
+    y2 = std::max(std::min(y2, img.rows-1), 0);
 
     //enlarge bbox by 1/3 of its size for background area
     int offsetX = (x2-x1)/3;
     int offsetY = (y2-y1)/3;
     int outer_y1 = std::max(0, (int)(y1-offsetY));
-    int outer_y2 = std::min(imgChannels[0].rows, (int)(y2+offsetY+1));
+    int outer_y2 = std::min(img.rows, (int)(y2+offsetY+1));
     int outer_x1 = std::max(0, (int)(x1-offsetX));
-    int outer_x2 = std::min(imgChannels[0].cols, (int)(x2+offsetX+1));
+    int outer_x2 = std::min(img.cols, (int)(x2+offsetX+1));
 
     //extract histogram from original data -> more pixels better representation of distr. by histograms
     Histogram hist_target =
-        (fgHistPrior.m_numBinsPerDim == numBinsPerChannel && (size_t)fgHistPrior.m_numDim == imgChannels.size())
-        ? fgHistPrior : Histogram(static_cast<int>(imgChannels.size()), numBinsPerChannel);
-    Histogram hist_background(static_cast<int>(imgChannels.size()), numBinsPerChannel);
+        (fgHistPrior.m_numBins == numBins)
+        ? fgHistPrior : Histogram(numBins);
+    Histogram hist_background(numBins);
     if (weights.cols == 0)
-        hist_target.extractForegroundHistogram(imgChannels, cv::Mat(), false, x1, y1, x2, y2);
+        hist_target.extractForegroundHistogram(img, cv::Mat(), false, x1, y1, x2, y2);
     else
-        hist_target.extractForegroundHistogram(imgChannels, weights, true, x1, y1, x2, y2);
-    hist_background.extractBackGroundHistogram(imgChannels, x1, y1, x2, y2,
+        hist_target.extractForegroundHistogram(img, weights, true, x1, y1, x2, y2);
+    hist_background.extractBackGroundHistogram(img, x1, y1, x2, y2,
             outer_x1, outer_y1, outer_x2, outer_y2);
 
     //compute resize factor so that the max area is 1000 (=avg. size ~ 32x32)
@@ -186,9 +165,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors(
 
     //rescale input data
     cv::Rect roiRect_inner = cv::Rect(x1, y1, x2-x1, y2-y1);
-    std::vector<cv::Mat> imgChannelsROI_inner(imgChannels.size());
-    for (size_t i = 0; i < imgChannels.size(); ++i)
-        cv::resize(imgChannels[i](roiRect_inner), imgChannelsROI_inner[i], newSize);
+    cv::Mat imgROI_inner;
+    cv::resize(img(roiRect_inner), imgROI_inner, newSize);
 
     //initialize priors if there is no external source and rescale
     cv::Mat fgPriorScaled;
@@ -203,8 +181,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors(
         cv::resize(bgPrior(roiRect_inner), bgPriorScaled, newSize);
 
     //backproject pixels likelihood
-    cv::Mat foregroundLikelihood = hist_target.backProject(imgChannelsROI_inner).mul(fgPriorScaled);
-    cv::Mat backgroundLikelihood = hist_background.backProject(imgChannelsROI_inner).mul(bgPriorScaled);
+    cv::Mat foregroundLikelihood = hist_target.backProject(imgROI_inner).mul(fgPriorScaled);
+    cv::Mat backgroundLikelihood = hist_background.backProject(imgROI_inner).mul(bgPriorScaled);
 
     double p_b = std::sqrt((std::pow(outer_x2-outer_x1, 2) + std::pow(outer_y2-outer_y1, 2)) /
             (std::pow(x2-x1, 2) + std::pow(y2-y1, 2))) ;
@@ -226,23 +204,23 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors(
 }
 
 std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(
-    std::vector<cv::Mat> &imgChannels, int x1, int y1, int x2, int y2, double p_b,
+    cv::Mat &img, int x1, int y1, int x2, int y2, double p_b,
     cv::Mat fgPrior, cv::Mat bgPrior, Histogram hist_target, Histogram hist_background)
 {
     //preprocess and normalize all data
-    CV_Assert(imgChannels.size() > 0);
+     CV_Assert(img.channels() == 1);
 
     //fit target to the image
-    x1 = std::min(std::max(x1, 0), imgChannels[0].cols-1);
-    y1 = std::min(std::max(y1, 0), imgChannels[0].rows-1);
-    x2 = std::max(std::min(x2, imgChannels[0].cols-1), 0);
-    y2 = std::max(std::min(y2, imgChannels[0].rows-1), 0);
+     x1 = std::min(std::max(x1, 0), img.cols - 1);
+     y1 = std::min(std::max(y1, 0), img.rows - 1);
+     x2 = std::max(std::min(x2, img.cols - 1), 0);
+     y2 = std::max(std::min(y2, img.rows - 1), 0);
 
     // calculate width and height of the region
     int w = x2 - x1 + 1;
     int h = y2 - y1 + 1;
-    w = std::min(std::max(w, 1), imgChannels[0].cols);
-    h = std::min(std::max(h, 1), imgChannels[0].rows);
+    w = std::min(std::max(w, 1), img.cols);
+    h = std::min(std::max(h, 1), img.rows);
 
     //double p_o = 1./(p_b + 1);
     double p_o = 1. - p_b;
@@ -255,9 +233,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(
 
     //rescale input data
     cv::Rect roiRect_inner = cv::Rect(x1, y1, w, h);
-    std::vector<cv::Mat> imgChannelsROI_inner(imgChannels.size());
-    for (size_t i = 0; i < imgChannels.size(); ++i)
-        cv::resize(imgChannels[i](roiRect_inner), imgChannelsROI_inner[i], newSize);
+    cv::Mat imgROI_inner;
+    cv::resize(img(roiRect_inner), imgROI_inner, newSize);
 
     //initialize priors if there is no external source and rescale
     cv::Mat fgPriorScaled;
@@ -272,8 +249,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(
         cv::resize(bgPrior(roiRect_inner), bgPriorScaled, newSize);
 
     //backproject pixels likelihood
-    cv::Mat foregroundLikelihood = hist_target.backProject(imgChannelsROI_inner).mul(fgPriorScaled);
-    cv::Mat backgroundLikelihood = hist_background.backProject(imgChannelsROI_inner).mul(bgPriorScaled);
+    cv::Mat foregroundLikelihood = hist_target.backProject(imgROI_inner).mul(fgPriorScaled);
+    cv::Mat backgroundLikelihood = hist_background.backProject(imgROI_inner).mul(bgPriorScaled);
 
     //convert likelihoods to posterior prob. (Bayes rule)
     cv::Mat prob_o(newSize, foregroundLikelihood.type());
@@ -292,17 +269,17 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(
     return probs;
 }
 
-std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(std::vector<cv::Mat> &imgChannels,
+std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(cv::Mat &img,
         cv::Mat fgPrior, cv::Mat bgPrior, Histogram hist_target, Histogram hist_background)
 {
     //preprocess and normalize all data
-    CV_Assert(imgChannels.size() > 0);
+    CV_Assert(img.channels() == 1);
 
     //fit target to the image
     int x1 = 0;
     int y1 = 0;
-    int x2 = imgChannels[0].cols-1;
-    int y2 = imgChannels[0].rows-1;
+    int x2 = img.cols-1;
+    int y2 = img.rows-1;
 
     //compute resize factor so that we control the max area ~32^2
     double factor = sqrt(1000./((x2-x1)*(y2-y1)));
@@ -313,9 +290,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(std::vector<cv::Mat> &im
 
     //rescale input data
     cv::Rect roiRect_inner = cv::Rect(x1, y1, x2-x1+1, y2-y1+1);
-    std::vector<cv::Mat> imgChannelsROI_inner(imgChannels.size());
-    for (size_t i = 0; i < imgChannels.size(); ++i)
-        cv::resize(imgChannels[i](roiRect_inner), imgChannelsROI_inner[i], newSize);
+    cv::Mat imgROI_inner;
+    cv::resize(img(roiRect_inner), imgROI_inner, newSize);
 
     //initialize priors if there is no external source and rescale
     cv::Mat fgPriorScaled;
@@ -331,8 +307,8 @@ std::pair<cv::Mat, cv::Mat> Segment::computePosteriors2(std::vector<cv::Mat> &im
         cv::resize(bgPrior(roiRect_inner), bgPriorScaled, newSize);
 
     //backproject pixels likelihood
-    cv::Mat foregroundLikelihood = hist_target.backProject(imgChannelsROI_inner).mul(fgPriorScaled);
-    cv::Mat backgroundLikelihood = hist_background.backProject(imgChannelsROI_inner).mul(bgPriorScaled);
+    cv::Mat foregroundLikelihood = hist_target.backProject(imgROI_inner).mul(fgPriorScaled);
+    cv::Mat backgroundLikelihood = hist_background.backProject(imgROI_inner).mul(bgPriorScaled);
 
     //prior for posterior, relative to the number of pixels in bg and fg
     double p_b = 5./3.;

@@ -115,7 +115,8 @@ bool TrackerCSRTImpl::check_mask_area(const Mat &mat, const double obj_area)
 }
 
 Mat TrackerCSRTImpl::calculate_response(const Mat &image, const std::vector<Mat> filter)
-{
+{ 
+    CV_Assert(image.channels() == 1);
     Mat patch = get_subwindow(image, object_center, cvFloor(current_scale_factor * template_size.width),
         cvFloor(current_scale_factor * template_size.height));
     resize(patch, patch, rescaled_template_size, 0, 0, INTER_CUBIC);
@@ -146,6 +147,7 @@ Mat TrackerCSRTImpl::calculate_response(const Mat &image, const std::vector<Mat>
 
 void TrackerCSRTImpl::update_csr_filter(const Mat &image, const Mat &mask)
 {
+    CV_Assert(image.channels() == 1);
     Mat patch = get_subwindow(image, object_center, cvFloor(current_scale_factor * template_size.width),
         cvFloor(current_scale_factor * template_size.height));
     resize(patch, patch, rescaled_template_size, 0, 0, INTER_CUBIC);
@@ -190,10 +192,10 @@ std::vector<Mat> TrackerCSRTImpl::get_features(const Mat &patch, const Size2i &f
 {
     std::vector<Mat> features;
     if (params.use_hog) {
-        std::vector<Mat> hog = get_features_hog(patch, cell_size);
-        features.insert(features.end(), hog.begin(),
-                hog.begin()+params.num_hog_channels_used);
+        Mat hog = get_features_hog(patch, cell_size);
+        features = hog;
     }
+    CV_Assert(params.use_color_names == false);
     if (params.use_color_names) {
         std::vector<Mat> cn;
         cn = get_features_cn(patch, feature_size);
@@ -201,16 +203,12 @@ std::vector<Mat> TrackerCSRTImpl::get_features(const Mat &patch, const Size2i &f
     }
     if(params.use_gray) {
         Mat gray_m;
-        cvtColor(patch, gray_m, COLOR_BGR2GRAY);
-        resize(gray_m, gray_m, feature_size, 0, 0, INTER_CUBIC);
+        resize(patch, gray_m, feature_size, 0, 0, INTER_CUBIC);
         gray_m.convertTo(gray_m, CV_32FC1, 1.0/255.0, -0.5);
         features.push_back(gray_m);
     }
-    if(params.use_rgb) {
-        std::vector<Mat> rgb_features = get_features_rgb(patch, feature_size);
-        features.insert(features.end(), rgb_features.begin(), rgb_features.end());
-    }
-
+    CV_Assert(params.use_rgb == false);
+  
     for (size_t i = 0; i < features.size(); ++i) {
         features.at(i) = features.at(i).mul(window);
     }
@@ -347,9 +345,7 @@ Mat TrackerCSRTImpl::segment_region(
             Rect(0,0, patch.size().width, patch.size().height),
             scaled_target , patch.size());
 
-    std::vector<Mat> img_channels;
-    split(patch, img_channels);
-    std::pair<Mat, Mat> probs = Segment::computePosteriors2(img_channels, 0, 0, patch.cols, patch.rows,
+    std::pair<Mat, Mat> probs = Segment::computePosteriors2(patch, 0, 0, patch.cols, patch.rows,
                     p_b, fg_prior, 1.0-fg_prior, hist_foreground, hist_background);
 
     Mat mask = Mat::zeros(probs.first.size(), probs.first.type());
@@ -378,27 +374,22 @@ void TrackerCSRTImpl::extract_histograms(const Mat &image, cv::Rect region, Hist
     int outer_x2 = std::min(image.cols, (int)(x2+offsetX+1));
 
     // calculate probability for the background
-    p_b = 1.0 - ((x2-x1+1) * (y2-y1+1)) /
+    p_b = 1.0 - ((x2-x1+1) * (y2-y1+1)) /  
         ((double) (outer_x2-outer_x1+1) * (outer_y2-outer_y1+1));
-
-    // split multi-channel image into the std::vector of matrices
-    std::vector<Mat> img_channels(image.channels());
-    split(image, img_channels);
-    for(size_t k=0; k<img_channels.size(); k++) {
-        img_channels.at(k).convertTo(img_channels.at(k), CV_8UC1);
-    }
-
-    hf.extractForegroundHistogram(img_channels, Mat(), false, x1, y1, x2, y2);
-    hb.extractBackGroundHistogram(img_channels, x1, y1, x2, y2,
+                                           
+       
+                                           
+    hf.extractForegroundHistogram(image, Mat(), false, x1, y1, x2, y2);
+    hb.extractBackGroundHistogram(image, x1, y1, x2, y2,
         outer_x1, outer_y1, outer_x2, outer_y2);
-    std::vector<Mat>().swap(img_channels);
 }
 
 void TrackerCSRTImpl::update_histograms(const Mat &image, const Rect &region)
 {
+    CV_Assert(image.channels() == 1);
     // create temporary histograms
-    Histogram hf(image.channels(), params.histogram_bins);
-    Histogram hb(image.channels(), params.histogram_bins);
+    Histogram hf( params.histogram_bins);
+    Histogram hb(params.histogram_bins);
     extract_histograms(image, region, hf, hb);
 
     // get histogram vectors from temporary histograms
@@ -426,7 +417,7 @@ void TrackerCSRTImpl::update_histograms(const Mat &image, const Rect &region)
 
 Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
 {
-
+    CV_Assert(image.channels() == 1);
     Mat resp = calculate_response(image, csr_filter);
 
     double max_val;
@@ -466,11 +457,9 @@ Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
 bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 {
     Mat image;
-    if(image_.channels() == 1)    //treat gray image as color image
-        cvtColor(image_, image, COLOR_GRAY2BGR);
-    else
-        image = image_;
-
+    CV_Assert(image.channels() == 1);
+    image = image_;
+    
     object_center = estimate_new_position(image);
     if (object_center.x < 0 && object_center.y < 0)
         return false;
@@ -484,9 +473,8 @@ bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 
     //update tracker
     if(params.use_segmentation) {
-        Mat hsv_img = bgr2hsv(image);
-        update_histograms(hsv_img, bounding_box);
-        filter_mask = segment_region(hsv_img, object_center,
+        update_histograms(image, bounding_box);
+        filter_mask = segment_region(image, object_center,
                 template_size,original_target_size, current_scale_factor);
         resize(filter_mask, filter_mask, yf.size(), 0, 0, INTER_NEAREST);
         if(check_mask_area(filter_mask, default_mask_area)) {
@@ -509,10 +497,9 @@ bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 bool TrackerCSRTImpl::initImpl(const Mat& image_, const Rect2d& boundingBox)
 {
     Mat image;
-    if(image_.channels() == 1)    //treat gray image as color image
-        cvtColor(image_, image, COLOR_GRAY2BGR);
-    else
-        image = image_;
+    CV_Assert(image_.channels() == 1);
+
+	image = image_;
 
     current_scale_factor = 1.0;
     image_size = image.size();
@@ -560,11 +547,10 @@ bool TrackerCSRTImpl::initImpl(const Mat& image_, const Rect2d& boundingBox)
 
     //initalize segmentation
     if(params.use_segmentation) {
-        Mat hsv_img = bgr2hsv(image);
-        hist_foreground = Histogram(hsv_img.channels(), params.histogram_bins);
-        hist_background = Histogram(hsv_img.channels(), params.histogram_bins);
-        extract_histograms(hsv_img, bounding_box, hist_foreground, hist_background);
-        filter_mask = segment_region(hsv_img, object_center, template_size,
+        hist_foreground = Histogram(params.histogram_bins);
+        hist_background = Histogram(params.histogram_bins);
+        extract_histograms(image, bounding_box, hist_foreground, hist_background);
+        filter_mask = segment_region(image, object_center, template_size,
                 original_target_size, current_scale_factor);
         //update calculated mask with preset mask
         if(preset_mask.data){
