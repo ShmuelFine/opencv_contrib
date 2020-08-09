@@ -42,9 +42,8 @@ Mat get_kaiser_win(Size sz, float alpha);
 Mat get_chebyshev_win(Size sz, float attenuation);
 
 std::vector<Mat> get_features_rgb(const Mat &patch, const Size &output_size);
-Mat get_features_hog(const Mat &im, const int bin_size);
+std::vector<Mat> get_features_hog(const Mat &im, const int bin_size);
 std::vector<Mat> get_features_cn(const Mat &im, const Size &output_size);
-
 Mat bgr2hsv(const Mat &img);
 
 } //cv namespace

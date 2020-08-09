@@ -483,7 +483,7 @@ static void computeHOG32D(const Mat& imageM, Mat& featM, const int sbin, const i
     const int dimHOG = 32;
     CV_Assert(pad_x >= 0);
     CV_Assert(pad_y >= 0);
-    CV_Assert(imageM.channels() == 3);
+    CV_Assert(imageM.channels() == 1);
     CV_Assert(imageM.depth() == CV_64F);
 
     // epsilon to avoid division by zero
@@ -531,28 +531,15 @@ static void computeHOG32D(const Mat& imageM, Mat& featM, const int sbin, const i
         for (int x = 1; x < visible.width - 1; x++)
         {
             // OpenCV uses an interleaved format: BGR-BGR-BGR
-            const double* s = im + 3 * min(x, imageM.cols - 2) + min(y, imageM.rows - 2) * imStride;
+            const double* s = im + 1 * min(x, imageM.cols - 2) + min(y, imageM.rows - 2) * imStride;
 
             // blue image channel
             double dyb = *(s + imStride) - *(s - imStride);
-            double dxb = *(s + 3) - *(s - 3);
+            double dxb = *(s + 1) - *(s - 1);
             double vb = dxb * dxb + dyb * dyb;
 
-            // green image channel
-            s += 1;
-            double dyg = *(s + imStride) - *(s - imStride);
-            double dxg = *(s + 3) - *(s - 3);
-            double vg = dxg * dxg + dyg * dyg;
-
-            // red image channel
-            s += 1;
-            double dy = *(s + imStride) - *(s - imStride);
-            double dx = *(s + 3) - *(s - 3);
-            double v = dx * dx + dy * dy;
-
             // pick the channel with the strongest gradient
-            if (vg > v) { v = vg; dx = dxg; dy = dyg; }
-            if (vb > v) { v = vb; dx = dxb; dy = dyb; }
+            double v = vb; double  dx = dxb; double dy = dyb;
 
             // snap to one of the 18 orientations
             double best_dot = 0;
@@ -693,7 +680,7 @@ static void computeHOG32D(const Mat& imageM, Mat& featM, const int sbin, const i
     }// for y
 }
 
-Mat get_features_hog(const Mat &im, const int bin_size)
+std::vector<Mat> get_features_hog(const Mat &im, const int bin_size)
 {
     Mat hogmatrix;
     Mat im_;
@@ -704,7 +691,9 @@ Mat get_features_hog(const Mat &im, const int bin_size)
     hog_size.width /= bin_size;
     hog_size.height /= bin_size;
     Mat hogc(hog_size, CV_32FC(32), hogmatrix.data);
-    return hogc;
+    std::vector<Mat> features;
+    split(hogc, features);
+    return features;
 }
 
 std::vector<Mat> get_features_cn(const Mat &ppatch_data, const Size &output_size) {

@@ -192,8 +192,9 @@ std::vector<Mat> TrackerCSRTImpl::get_features(const Mat &patch, const Size2i &f
 {
     std::vector<Mat> features;
     if (params.use_hog) {
-        Mat hog = get_features_hog(patch, cell_size);
-        features = hog;
+        std::vector<Mat> hog = get_features_hog(patch, cell_size);
+        features.insert(features.end(), hog.begin(),
+            hog.begin() + params.num_hog_channels_used);
     }
     CV_Assert(params.use_color_names == false);
     if (params.use_color_names) {
@@ -457,9 +458,8 @@ Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
 bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 {
     Mat image;
-    CV_Assert(image.channels() == 1);
     image = image_;
-    
+    CV_Assert(image.channels() == 1);
     object_center = estimate_new_position(image);
     if (object_center.x < 0 && object_center.y < 0)
         return false;
