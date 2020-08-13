@@ -30,12 +30,13 @@ public:
     TrackerCSRTImpl(const TrackerCSRT::Params &parameters = TrackerCSRT::Params());
     void read(const FileNode& fn) CV_OVERRIDE;
     void write(FileStorage& fs) const CV_OVERRIDE;
+    virtual float getLastTrackConf() const CV_OVERRIDE;
+    virtual void setInitialMask(InputArray mask) CV_OVERRIDE;
 
 protected:
     TrackerCSRT::Params params;
-
+    double psr_max_response;
     bool initImpl(const Mat& image, const Rect2d& boundingBox) CV_OVERRIDE;
-    virtual void setInitialMask(InputArray mask) CV_OVERRIDE;
     bool updateImpl(const Mat& image, Rect2d& boundingBox) CV_OVERRIDE;
     void update_csr_filter(const Mat &image, const Mat &my_mask);
     void update_histograms(const Mat &image, const Rect &region);
@@ -84,7 +85,7 @@ Ptr<TrackerCSRT> TrackerCSRT::create()
     return Ptr<TrackerCSRTImpl>(new TrackerCSRTImpl());
 }
 TrackerCSRTImpl::TrackerCSRTImpl(const TrackerCSRT::Params &parameters) :
-    params(parameters)
+    params(parameters), psr_max_response(0)
 {
     isInit = false;
 }
@@ -103,6 +104,12 @@ void TrackerCSRTImpl::setInitialMask(InputArray mask)
 {
     preset_mask = mask.getMat();
 }
+
+float TrackerCSRTImpl::getLastTrackConf() const
+{
+    return psr_max_response;
+}
+
 
 bool TrackerCSRTImpl::check_mask_area(const Mat &mat, const double obj_area)
 {
@@ -416,11 +423,9 @@ Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
     CV_Assert(image.channels() == 1);
     Mat resp = calculate_response(image, csr_filter);
 
-    double max_val;
     Point max_loc;
-    minMaxLoc(resp, NULL, &max_val, NULL, &max_loc);
-    // @ Test: std::cout << "max loc:" << max_loc << " = " << max_val << std::endl;
-    if (max_val < params.psr_threshold)
+    minMaxLoc(resp, NULL, &psr_max_response, NULL, &max_loc);
+    if (psr_max_response < params.psr_threshold)
         return Point2f(-1,-1); // target "lost"
 
     // take into account also subpixel accuracy

@@ -1537,6 +1537,8 @@ public:
 
   CV_WRAP virtual void setInitialMask(InputArray mask) = 0;
 
+  CV_WRAP virtual float getLastTrackConf() const = 0;
+
   virtual ~TrackerCSRT() CV_OVERRIDE {}
 };
 
