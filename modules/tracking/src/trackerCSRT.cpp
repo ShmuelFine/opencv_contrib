@@ -183,8 +183,6 @@ void TrackerCSRTImpl::update_csr_filter(const Mat &image, const Mat &mask)
     for(size_t i = 0; i < csr_filter.size(); ++i) {
         csr_filter[i] = (1.0f - params.filter_lr)*csr_filter[i] + params.filter_lr * new_csr_filter[i];
     }
-    std::vector<Mat>().swap(ftrs);
-    std::vector<Mat>().swap(Fftrs);
 }
 
 
@@ -411,9 +409,6 @@ void TrackerCSRTImpl::update_histograms(const Mat &image, const Rect &region)
     // set learned histograms
     hist_foreground.setHistogramVector(&hf_vect_new[0]);
     hist_background.setHistogramVector(&hb_vect_new[0]);
-
-    std::vector<double>().swap(hf_vect);
-    std::vector<double>().swap(hb_vect);
 }
 
 Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
@@ -424,6 +419,7 @@ Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
     double max_val;
     Point max_loc;
     minMaxLoc(resp, NULL, &max_val, NULL, &max_loc);
+    // @ Test: std::cout << "max loc:" << max_loc << " = " << max_val << std::endl;
     if (max_val < params.psr_threshold)
         return Point2f(-1,-1); // target "lost"
 
@@ -458,7 +454,11 @@ Point2f TrackerCSRTImpl::estimate_new_position(const Mat &image)
 bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 {
     Mat image;
-    image = image_;
+    if (image_.channels() > 1)
+        cvtColor(image_, image, COLOR_BGR2GRAY);
+    else
+        image = image_;
+
     CV_Assert(image.channels() == 1);
     object_center = estimate_new_position(image);
     if (object_center.x < 0 && object_center.y < 0)
@@ -497,9 +497,11 @@ bool TrackerCSRTImpl::updateImpl(const Mat& image_, Rect2d& boundingBox)
 bool TrackerCSRTImpl::initImpl(const Mat& image_, const Rect2d& boundingBox)
 {
     Mat image;
-    CV_Assert(image_.channels() == 1);
 
-	image = image_;
+    if (image_.channels() > 1)
+        cvtColor(image_, image, COLOR_BGR2GRAY);
+    else
+        image = image_;
 
     current_scale_factor = 1.0;
     image_size = image.size();
